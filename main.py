@@ -1,149 +1,200 @@
 import pandas as pd
 import numpy as np
+from openpyxl import Workbook
+from openpyxl.utils import get_column_letter
+from openpyxl.utils.dataframe import dataframe_to_rows
+import os
 
+
+filename = 'am002456.xls'
+
+
+
+def is_number(n):
+    try:
+        float(n)
+        return True
+    except ValueError:
+        return False
+
+#original_sheet = job summary-landscape.xls
 # Load spreadsheet
-xl = pd.read_excel('testjob.xls', engine='xlrd')
+xl = pd.read_excel(filename, engine='xlrd')
 
-# Find the index of the row containing "HARDWARE PARTS"
+# Initial processing, getting rid of whole pages
 start_index = xl[xl.apply(lambda row: row.astype(str).str.contains('HARDWARE PARTS').any(), axis=1)].index[0]
-
-# Find the index of the row containing "Packsize Program"
 end_index = xl[xl.apply(lambda row: row.astype(str).str.contains('Packsize Program').any(), axis=1)].index[0]
-
-# Remove all rows above the start row and below the end row
-xl = xl.loc[start_index:end_index-1]
-
-# Define the list of sections
-sections = ['HARDWARE PARTS', 'ACCESSORY PARTS for BUYOUT',
-            'ADDITIONAL ACCESSORY PARTS', 'RECESSED HARDWARE - Install Prior to Shipping',
-            'Berenson INTEGRATED PULL PARTS']
-
-# Add a new column "Section" initialized with NaN
-xl['Section'] = np.nan
-
-# Assign the section names to the 'Section' column and set the original cells to blank
-for sec in sections:
-    sec_indices = xl[xl.apply(lambda row: row.astype(str).str.contains(sec).any(), axis=1)].index
-    xl.loc[sec_indices, 'Section'] = sec
-    xl.loc[sec_indices, xl.columns[0]] = ""  # Clear only the first column of the identified rows
-
-# Find the index of the row containing "Metal Parts - Cut Length and Qty"
 metal_parts_index = xl[xl.apply(lambda row: row.astype(str).str.contains('Metal Parts - Cut Length and Qty').any(), axis=1)].index[0]
-
-# Find the index of the row containing "ACCESSORY PARTS for BUYOUT"
 accessory_buyout_index = xl[xl.apply(lambda row: row.astype(str).str.contains('ACCESSORY PARTS for BUYOUT').any(), axis=1)].index[0]
 
-# Remove all rows from "Metal Parts - Cut Length and Qty" to "ACCESSORY PARTS for BUYOUT"
+xl = xl.loc[start_index:end_index-1]
 xl = xl.drop(list(range(metal_parts_index, accessory_buyout_index)))
 
-# Get the index of the start and end of "ACCESSORY PARTS for BUYOUT" section
-accessory_start_index = xl[xl['Section'] == 'ACCESSORY PARTS for BUYOUT'].index[0]
-accessory_end_index = xl[xl['Section'] == 'ADDITIONAL ACCESSORY PARTS'].index[0]
+# Find rows where the 4th column is either NaN, empty, or contains only whitespace
+# For these rows, replace the value in the 4th column with the value from the 3rd column
+xl.loc[xl[xl.columns[3]].isna() | (xl[xl.columns[3]] == '') | (xl[xl.columns[3]].astype(str).str.isspace()), xl.columns[3]] = xl.loc[xl[xl.columns[3]].isna() | (xl[xl.columns[3]] == '') | (xl[xl.columns[3]].astype(str).str.isspace()), xl.columns[2]]
 
-# # Re-arrange the cells for "ACCESSORY PARTS for BUYOUT" section and create a new section "GLASS PARTS"
-for idx in range(accessory_start_index + 1, accessory_end_index):
-
-        xl.loc[idx, 'Temp1'] = xl.loc[idx, xl.columns[0]]
-        xl.loc[idx, 'Temp2'] = xl.loc[idx, xl.columns[1]]
-        xl.loc[idx, 'Temp3'] = xl.loc[idx, xl.columns[4]]
-
-        xl.loc[idx, xl.columns[0]] = xl.loc[idx, 'Temp2']
-        xl.loc[idx, xl.columns[1]] = np.nan
-        xl.loc[idx, xl.columns[5]] = xl.loc[idx, 'Temp1']
-
-        xl.loc[idx, xl.columns[4]] = np.nan
-        xl.loc[idx, xl.columns[3]] = xl.loc[idx, 'Temp3']
+# Then, for these same rows, set the value in the 3rd column to an empty string
+xl.loc[xl[xl.columns[3]].isna() | (xl[xl.columns[3]] == '') | (xl[xl.columns[3]].astype(str).str.isspace()), xl.columns[2]] = ""
 
 
-# Get the index of the start and end of "ADDITIONAL ACCESSORY PARTS" section
-additional_start_index = xl[xl['Section'] == 'ADDITIONAL ACCESSORY PARTS'].index[0]
-additional_end_index = xl[xl['Section'] == 'RECESSED HARDWARE - Install Prior to Shipping'].index[0]
+# Section handling
+sections = [
+    'HARDWARE PARTS',
+    'Hinges & Mounting Plates',
+    'Legrabox & Antaro',
+    'Metabox, Tandem & Accuride',
+    'Blum Metal Parts',
+    'Closet',
+    'Other',
+    'ACCESSORY PARTS for BUYOUT',
+    'ADDITIONAL ACCESSORY PARTS',
+    'Berenson INTEGRATED PULL PARTS',
+    'RECESSED HARDWARE - Install Prior to Shipping',
+]
 
-# Re-arrange the cells for "ADDITIONAL ACCESSORY PARTS" section
-for idx in range(additional_start_index + 1, additional_end_index):
-    xl.loc[idx, 'Temp1'] = xl.loc[idx, xl.columns[0]]
-    xl.loc[idx, 'Temp2'] = xl.loc[idx, xl.columns[2]]
-    xl.loc[idx, 'Temp3'] = xl.loc[idx, xl.columns[3]]
-    xl.loc[idx, 'Temp4'] = xl.loc[idx, xl.columns[7]]
+xl.insert(0, 'Section', np.nan)
 
-    xl.loc[idx, xl.columns[0]] = xl.loc[idx, 'Temp3']
-    xl.loc[idx, xl.columns[3]] = np.nan
-    xl.loc[idx, xl.columns[9]] = xl.loc[idx, 'Temp1']
+for section in sections:
+    section_rows = xl[xl.iloc[:, 1] == section].index
+    xl.loc[section_rows, 'Section'] = section
+    xl.loc[section_rows, xl.columns[1]] = ""
+    print(section)
 
-    xl.loc[idx, xl.columns[2]] = np.nan
-    xl.loc[idx, xl.columns[5]] = xl.loc[idx, 'Temp2']
+section_indexes = {}
+for section in sections:
+    section_indexes[section] = xl[xl[xl.columns[0]] == section].index.tolist()
 
-    xl.loc[idx, xl.columns[7]] = np.nan
-    xl.loc[idx, xl.columns[6]] = xl.loc[idx, 'Temp4']
+for i, (section, indexes) in enumerate(section_indexes.items()):
+    if not indexes:
+        continue
+    start_index = indexes[0]
+    if i+1 < len(sections):
+        next_section = sections[i+1]
+        if next_section in section_indexes and section_indexes[next_section]: # check if the section exists and is not empty
+            end_index = section_indexes[next_section][0]
+        else:
+            end_index = xl.index[-1]
+    else:
+        end_index = xl.index[-1]
+    print(f"Start index for {section}: {start_index}")
+    print(f"End index for {section}: {end_index}")
+    print(f"Processing section: {section}")
 
-# # Get the index of the start and end of "GLASS PARTS" section
-# glass_start_index = xl[xl['Section'] == 'GLASS PARTS'].index[0]
-# glass_end_index = xl[xl['Section'] == 'ADDITIONAL ACCESSORY PARTS'].index[0]
+    if section == 'HARDWARE PARTS':
+        pass
+    elif section == 'ACCESSORY PARTS for BUYOUT':
+        xl.loc[start_index + 1 : end_index - 1, xl.columns[4]] = xl.loc[start_index + 1 : end_index - 1, xl.columns[5]]
+        # xl.loc[start_index + 1 : end_index - 1, xl.columns[2]] = ""
+        xl.loc[start_index + 1: end_index - 1, xl.columns[6]] = xl.loc[start_index + 1: end_index - 1, xl.columns[1]]
+        xl.loc[start_index + 1 : end_index - 1, xl.columns[1]] = xl.loc[start_index + 1 : end_index - 1, xl.columns[2]]
+        # xl.loc[start_index + 1: end_index - 1, xl.columns[4]] = ""
 
+    elif section == 'Blum Metal Parts':
+        xl.loc[start_index + 1: end_index - 1, xl.columns[6]] = xl.loc[start_index + 1: end_index - 1, xl.columns[7]]
+        xl.loc[xl[xl.columns[3]].isna() | (xl[xl.columns[3]] == '') | (xl[xl.columns[3]].astype(str).str.isspace()),
+        xl.columns[3]] = xl.loc[xl[xl.columns[3]].isna() | (xl[xl.columns[3]] == '') | (xl[xl.columns[3]].astype(str).str.isspace()), xl.columns[2]]
+        xl.loc[xl[xl.columns[3]].isna() | (xl[xl.columns[3]] == '') | (xl[xl.columns[3]].astype(str).str.isspace()), xl.columns[2]] = ""
+    elif section == 'Closet':
+        xl.loc[start_index + 1: end_index - 1, xl.columns[6]] = xl.loc[start_index + 1: end_index - 1, xl.columns[7]]
 
-# # Re-arrange the cells for "GLASS PARTS" section
-# for idx in range(glass_start_index + 1, glass_end_index):
-#     xl.loc[idx, xl.columns[10]] = xl.loc[idx, xl.columns[8]]
-#     xl.loc[idx, xl.columns[11]] = xl.loc[idx, xl.columns[9]]
-#
-#     xl.loc[idx, xl.columns[8]] = np.nan
-#     xl.loc[idx, xl.columns[9]] = np.nan
+    elif section == 'Other':
+        # create a mask for NaN or empty or blank cells in column 6
+        mask = xl[xl.columns[6]].isna() | (xl[xl.columns[6]] == '') | (xl[xl.columns[6]].astype(str).str.isspace())
+        # apply the mask along with the original condition
+        xl.loc[mask & (start_index + 1 <= xl.index) & (xl.index <= end_index - 1), xl.columns[6]] = xl.loc[
+        mask & (start_index + 1 <= xl.index) & (xl.index <= end_index - 1), xl.columns[7]]
 
+    elif section == 'ADDITIONAL ACCESSORY PARTS':
+             xl.loc[start_index + 1: end_index - 1, xl.columns[6]] = xl.loc[start_index + 1: end_index - 1, xl.columns[3]]
+             xl.loc[start_index + 1: end_index - 1, xl.columns[1]] = xl.loc[start_index + 1: end_index - 1, xl.columns[4]]
 
-# def final_cleanup(df):
-#     # Remove rows containing 'PART' in column 0, 'BUY' in column 7 and 'QTY' in column 5
-#     df = df[~((df[df.columns[0]].str.contains('PART', na=False)) & (df[df.columns[7]].str.contains('BUY', na=False)) & (
-#         df[df.columns[5]].str.contains('QTY', na=False)))]
-#
-#     # Also remove rows containing 'PART#', 'PART #', or 'PART  #' in column 0
-#     df = df[~df[df.columns[0]].str.contains('PART\s*#', regex=True, na=False)]
-#
-#     # Drop the specified columns
-#     df = df.drop(df.columns[[2, 4, 6, 7, 8]], axis=1)
-#
-#     # Move the contents of the last column to column 7
-#     df[df.columns[7]] = df[df.columns[-1]]  # -1 refers to the last column
-#     df = df.drop(df.columns[-1], axis=1)
-#
-#     # If there is data in column 0 and no data in column 3 and column 7, move the contents of column 0 to column 7
-#     mask = df[df.columns[0]].notna() & df[df.columns[3]].isna() & df[df.columns[7]].isna()
-#     df.loc[mask, df.columns[7]] = df.loc[mask, df.columns[0]]
-#
-#     # After moving the contents from column 0 to 7, make column 0 blank where the content has been moved
-#     df.loc[mask, df.columns[0]] = np.nan
-#
-#     # If column 0 is empty and column 4 is not empty, move the contents of column 4 to column 7
-#     mask_2 = df[df.columns[0]].isna() & df[df.columns[4]].notna()
-#     df.loc[mask_2, df.columns[7]] = df.loc[mask_2, df.columns[4]]
-#
-#     # After moving the contents from column 4 to 7, make column 4 blank where the content has been moved
-#     df.loc[mask_2, df.columns[4]] = np.nan
-#
-#     # Replace cells containing 'BUY' or 'PICKED' with NaN
-#     df.replace('BUY', np.nan, inplace=True)
-#     df.replace('PICKED', np.nan, inplace=True)
-#
-#     return df
+    elif section == 'RECESSED HARDWARE - Install Prior to Shipping':
+            pass
+
+    elif section == 'Berenson INTEGRATED PULL PARTS':
+        xl.loc[start_index + 1: end_index - 1, xl.columns[6]] = xl.loc[start_index + 1: end_index - 1, xl.columns[7]]
 
 
-# Drop the temporary columns
-xl = xl.drop(['Temp1', 'Temp2', 'Temp3', 'Temp4'], axis=1)
 
-# Remove all blank rows
 xl = xl.dropna(how='all')
 
-# Print the DataFrame to console
+
+
 print(xl)
+# final touchups to the dataframe, replacing NaNs with empty strings, removing rows based on conditions, etc.
+xl.replace('', np.nan, inplace=True)
+rows_to_drop_partname = xl[xl.iloc[:, 1] == 'PART NAME'].index
+xl.drop(rows_to_drop_partname, inplace=True)
+rows_to_drop_qty = xl[xl.iloc[:, 0] == 'QTY'].index
+xl.drop(rows_to_drop_qty, inplace=True)
+rows_to_drop_qty2 = xl[xl.iloc[:, 3] == 'QTY'].index
+xl.drop(rows_to_drop_qty2, inplace=True)
+rows_to_drop_description = xl[xl.iloc[:, 2] == 'Description'].index
+xl.drop(rows_to_drop_description, inplace=True)
+words = ['BUY', 'PICKED', 'ID#', 'PART #', 'PART  #', 'QTY', 'ID  #']
+rows_to_remove = xl[xl.iloc[:, 7:].isin(words).any(axis=1)].index
+xl = xl.drop(rows_to_remove)
+xl = xl.replace(words, '')
+print(xl.columns)
 
-# Before saving the Excel file, call the final_cleanup function
-# xl = final_cleanup(xl)
+# Replace 'Custom Drilling- See CDR form' with an empty string '' in column B
+xl['Unnamed: 0'] = xl['Unnamed: 0'].str.replace('\s*Custom Drilling- See CDR form', '', regex=True)
 
+xl.dropna(how='all', inplace=True)
 
-# Reset the index
 xl = xl.reset_index(drop=True)
+#xl.drop(xl.columns[[2, 4, 6, 7]], axis=1, inplace=True)
+
+xl.to_excel('cleaned_data3.xlsx', index=False)
+
+# Assuming filename contains the name of the original file
+file_name, _ = os.path.splitext(filename)
+
+# Append "_cleaned" and add the file extension ".xlsx"
+new_file_name = f"{file_name}_cleaned.xlsx"
+
+# Now you can save the DataFrame to the new Excel file
+xl.to_excel(new_file_name, index=False)
+
+# Create a new workbook and select the active worksheet
+wb = Workbook()
+ws = wb.active
+
+# Transfer data from pandas DataFrame to the worksheet
+for r in dataframe_to_rows(xl, index=False, header=True):
+    ws.append(r)
+# Rename columns
+ws['A1'] = 'SECTION'
+ws['B1'] = 'Inventory ID'
+ws['E1'] = 'DESCRIPTION'
+ws['G1'] = 'QTY'
+from openpyxl.utils import column_index_from_string
+
+# The columns to keep
+cols_to_keep = ['A', 'B', 'E', 'G']
+
+# Convert column letters to indices
+indices_to_keep = [column_index_from_string(col) for col in cols_to_keep]
+
+# Delete columns in reverse order, so that deleting one column doesn't shift the indices of the others
+for col_idx in range(ws.max_column, 0, -1):  # start from the last column
+    if col_idx not in indices_to_keep:
+        ws.delete_cols(col_idx)
 
 
+# Adjust column widths
+for column in ws.columns:
+    max_length = 0
+    column = [cell for cell in column]
+    for cell in column:
+        try:
+            if len(str(cell.value)) > max_length:
+                max_length = len(cell.value)
+        except:
+            pass
+    adjusted_width = (max_length + 2)
+    ws.column_dimensions[get_column_letter(column[0].column)].width = adjusted_width
 
-# Save to new .xlsx file (in Excel 2007+ format)
-xl.to_excel('cleaned_data.xlsx', index=False)
-
+# Save the workbook
+wb.save(new_file_name)
