@@ -1,9 +1,10 @@
+
+import os
 import pandas as pd
 import numpy as np
-from openpyxl import Workbook
-from openpyxl.utils import get_column_letter
+from openpyxl import Workbook, load_workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
-import os
+import math
 
 def clean_excel_file(filename):
     # Load spreadsheet
@@ -172,6 +173,10 @@ def clean_excel_file(filename):
     wb = Workbook()
     ws = wb.active
 
+    # Remove rows where 'Inventory ID' is empty
+    xl = xl[pd.notnull(xl.iloc[:, 1])]  # Selects second column for check (0-indexed)
+    xl.reset_index(drop=True, inplace=True)
+
     # Transfer data from pandas DataFrame to the worksheet
     for r in dataframe_to_rows(xl, index=False, header=True):
         ws.append(r)
@@ -179,8 +184,8 @@ def clean_excel_file(filename):
 
     ws['A1'].value = 'SECTION'
     ws['B1'].value = 'Inventory ID'
-    ws['E1'].value = 'DESCRIPTION'
-    ws['G1'].value = 'QTY'
+    ws['E1'].value = 'Description'
+    ws['G1'].value = 'Qty Required'
 
     from openpyxl.utils import column_index_from_string, get_column_letter
 
@@ -191,25 +196,57 @@ def clean_excel_file(filename):
     indices_to_keep = [column_index_from_string(col) - 1 for col in cols_to_keep]
 
     # Delete columns in reverse order, so that deleting one column doesn't shift the indices of the others
-    for col_idx in range(ws.max_column, 0, -1):  # start from the last column
+    for col_idx in range(ws.max_column, -1, -1):  # start from the last column
         if col_idx not in indices_to_keep:
             ws.delete_cols(col_idx+1)
 
-    # Adjust column widths
-    for column in ws.columns:
-        max_length = 0
-        column = [cell for cell in column]
-        for cell in column:
-            try:
-                if len(str(cell.value)) > max_length:
-                    max_length = len(cell.value)
-            except:
-                pass
-        adjusted_width = (max_length + 2)
-        ws.column_dimensions[get_column_letter(column[0].column)].width = adjusted_width
+    # Set width for column A to 30
+    ws.column_dimensions['A'].width = 30
 
-    # Save the workbook
-    wb.save(new_file_name)
+    # Set width for column B to 20
+    ws.column_dimensions['B'].width = 40
+
+    # Set width for column C to 40
+    ws.column_dimensions['C'].width = 13
+
+    # remove 'Section' column
+    ws.delete_cols(1)
+
+
+
+    # Assume ws is your worksheet object
+    for row in ws.iter_rows(min_row=2, max_col=ws.max_column, max_row=ws.max_row):
+        cell = row[2]  # change the index based on your 'Qty Required' column index
+        if cell.value is not None and isinstance(cell.value, float):
+            cell.value = math.ceil(cell.value)
+
+    for row in ws.iter_rows():
+        for cell in row:
+            if cell.value is not None and isinstance(cell.value, str):
+                cell.value = cell.value.replace('_', ' ')
+
+    # Load the template
+    wb_template = load_workbook('BOM Template.xlsx')
+    ws_template = wb_template.active
+
+    # Convert cleaned data to a DataFrame
+    df_clean = pd.DataFrame(ws.values)
+
+    # Drop the header row from cleaned data
+    df_clean = df_clean.iloc[1:]
+
+    # Get the number of non-empty rows in the template before appending
+    rows_in_template = sum((1 for row in ws_template.iter_rows() if any(cell.value for cell in row)))
+
+    # Append data from the cleaned DataFrame to the template worksheet
+    for index, row in df_clean.iterrows():
+        for i, value in enumerate(row.values):
+            # index + 2 to offset zero-based index and header row
+            # i + 1 to offset zero-based index
+            ws_template.cell(row=index + rows_in_template + 1, column=i + 1, value=value)
+
+    # Save the template
+    wb_template.save(new_file_name)
 
     return xl
 
